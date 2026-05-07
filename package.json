@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "start": "node server.ts",
+    "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "status": "npm run dev",
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@supabase/supabase-js": "^2.105.3",
     "@tailwindcss/vite": "^4.1.14",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
@@ -35,6 +36,7 @@
     "recharts": "^3.8.1",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.6",
+    "tsx": "^4.21.0",
     "vite": "^6.2.3"
   },
   "devDependencies": {

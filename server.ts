@@ -8,12 +8,27 @@ import { Database, open } from 'sqlite';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Constants & Secret ---
 const JWT_SECRET = process.env.JWT_SECRET || 'campus-placement-super-secret-key';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+// Supabase Admin Client for the backend
+let supabase: any;
+try {
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  } else {
+    console.warn('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing. Supabase features will be disabled.');
+  }
+} catch (error) {
+  console.error('Failed to initialize Supabase client:', error);
+}
 const PORT = 3000;
 
 // --- Custom Exceptions ---
@@ -226,62 +241,130 @@ async function initDb() {
   `);
 
   // Seed default admin if not exists
-  const adminExists = await db.get('SELECT * FROM admins LIMIT 1');
-  if (!adminExists) {
+  const adminEmail = 'admin@placement.edu';
+  const admin = await db.get('SELECT * FROM admins WHERE email = ?', [adminEmail]);
+  if (!admin) {
     const hashedPassword = await bcrypt.hash('admin123', 10);
     await db.run('INSERT INTO admins (id, name, email, password) VALUES (?, ?, ?, ?)', 
-      ['admin-1', 'Super Admin', 'admin@placement.edu', hashedPassword]);
+      ['admin-1', 'Super Admin', adminEmail, hashedPassword]);
   }
 
-  // Seed sample data for testing
-  const studentExists = await db.get('SELECT * FROM students LIMIT 1');
-  if (!studentExists) {
+  // Seed sample student if not exists
+  const studentEmail = 'student@college.edu';
+  const student = await db.get('SELECT * FROM students WHERE email = ?', [studentEmail]);
+  if (!student) {
     const pass = await bcrypt.hash('student123', 10);
-    const compPass = await bcrypt.hash('company123', 10);
-    
-    // Seed Student
     await db.run('INSERT INTO students (id, name, email, password, cgpa, skills, branch) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['std-1', 'John Doe', 'student@placement.edu', pass, 8.5, JSON.stringify(['React', 'Node.js']), 'Computer Science']);
-    
-    // Seed Company
-    await db.run('INSERT INTO companies (id, name, email, password, description, website) VALUES (?, ?, ?, ?, ?, ?)',
-      ['comp-1', 'TechCorp', 'hr@techcorp.com', compPass, 'Leading AI Solutions', 'https://techcorp.com']);
-    
-    // Seed Job
-    await db.run('INSERT INTO job_roles (id, company_id, title, min_cgpa, required_skills, package_amount, job_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['job-1', 'comp-1', 'Frontend Architect', 7.5, JSON.stringify(['React']), 1200000, 'TECHNICAL']);
+      ['std-1', 'John Doe', studentEmail, pass, 8.5, JSON.stringify(['React', 'Node.js', 'Python']), 'Computer Science']);
   }
+
+  // Seed sample company if not exists
+  const companyEmail = 'company@hr.com';
+  const company = await db.get('SELECT * FROM companies WHERE email = ?', [companyEmail]);
+  if (!company) {
+    const compPass = await bcrypt.hash('company123', 10);
+    await db.run('INSERT INTO companies (id, name, email, password, description, website) VALUES (?, ?, ?, ?, ?, ?)',
+      ['comp-1', 'Global Solutions', companyEmail, compPass, 'Innovative HR and Tech Solutions', 'https://globalsolutions.com']);
+    
+    // Seed a job for this company
+    await db.run('INSERT INTO job_roles (id, company_id, title, min_cgpa, required_skills, package_amount, job_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['job-1', 'comp-1', 'Junior Developer', 7.0, JSON.stringify(['React', 'JavaScript']), 800000, 'TECHNICAL']);
+    
+    console.log('Sample data seeded successfully.');
+  }
+
+  const counts = {
+    admins: (await db.get('SELECT COUNT(*) as c FROM admins')).c,
+    students: (await db.get('SELECT COUNT(*) as c FROM students')).c,
+    companies: (await db.get('SELECT COUNT(*) as c FROM companies')).c,
+    jobs: (await db.get('SELECT COUNT(*) as c FROM job_roles')).c
+  };
+  console.log('DB Baseline Status:', counts);
 }
 
 // --- Middleware ---
-const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
+const authenticateToken = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.sendStatus(401);
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-    if (err) return res.sendStatus(403);
-    (req as any).user = user;
+  try {
+    // Verify Supabase Token
+    if (!supabase) {
+      // Fallback to local JWT if Supabase is not configured
+      jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+        if (err) return res.sendStatus(403);
+        (req as any).user = decoded;
+        next();
+      });
+      return;
+    }
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !user) {
+      // Fallback to local JWT if any (for transition)
+      jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+        if (err) return res.sendStatus(403);
+        (req as any).user = decoded;
+        next();
+      });
+      return;
+    }
+
+    (req as any).user = {
+      id: user.id,
+      email: user.email,
+      role: user.user_metadata?.role || 'STUDENT' // Fallback or fetch from profile
+    };
     next();
-  });
+  } catch (err) {
+    res.sendStatus(403);
+  }
 };
 
 // --- API Routes ---
 async function setupRoutes(app: express.Express) {
   // Authentication
   app.post('/api/auth/login', async (req, res) => {
-    const { email, password, role } = req.body;
-    let user;
-    let table = role.toLowerCase() + 's';
-    
-    user = await db.get(`SELECT * FROM ${table} WHERE email = ?`, [email]);
-    
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    try {
+      const { email, password, role } = req.body;
+      console.log(`Login attempt: ${email} as ${role}`);
+      
+      if (!role) return res.status(400).json({ message: 'Role is required' });
+      
+      let table = role.toLowerCase() === 'company' ? 'companies' : role.toLowerCase() + 's';
+      
+      // Basic injection protection since we use template literal for table name
+      if (!['admins', 'students', 'companies'].includes(table)) {
+        return res.status(400).json({ message: 'Invalid role' });
+      }
 
-    const token = jwt.sign({ id: user.id, role, email: user.email }, JWT_SECRET);
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role } });
+      if (!db) {
+        console.error('DATABASE NOT INITIALIZED');
+        return res.status(500).json({ message: 'Database initialization pending' });
+      }
+
+      const user = await db.get(`SELECT * FROM ${table} WHERE email = ?`, [email]);
+      
+      if (!user) {
+        console.log(`User not found: ${email} in ${table}`);
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        console.log(`Password mismatch for: ${email}`);
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign({ id: user.id, role, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+      console.log(`Login successful: ${email}`);
+      res.json({ token, user: { id: user.id, name: user.name, email: user.email, role } });
+    } catch (error: any) {
+      console.error('Login Error:', error);
+      res.status(500).json({ message: 'Server error during login', error: error.message });
+    }
   });
 
   app.post('/api/auth/register-student', async (req, res) => {
@@ -497,9 +580,21 @@ async function startServer() {
   await setupRoutes(app);
   console.log('Routes setup complete.');
 
+  // Unhandled error handler
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error('SERVER ERROR:', err);
+    res.status(500).json({ 
+      message: 'Internal server error', 
+      error: process.env.NODE_ENV === 'production' ? null : err.message 
+    });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: false // Explicitly disable HMR to avoid port 24678 conflicts
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -510,9 +605,34 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  server.on('error', (e: any) => {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. The platform will retry shortly.`);
+    } else {
+      console.error('Server error:', e);
+    }
+  });
+
+  // Handle graceful shutdown to avoid EADDRINUSE
+  const shutdown = () => {
+    console.log('Shutting down server...');
+    server.close(() => {
+      console.log('Server stopped.');
+      process.exit(0);
+    });
+    // Force close after 5s
+    setTimeout(() => {
+      console.error('Could not close connections in time, forcefully shutting down');
+      process.exit(1);
+    }, 5000);
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 startServer();

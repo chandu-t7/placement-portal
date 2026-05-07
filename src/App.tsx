@@ -32,6 +32,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+import { supabase } from './lib/supabase';
+
 // --- Types & Context ---
 interface User {
   id: string;
@@ -191,11 +193,30 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await axios.post('/api/auth/login', { email, password, role });
-      login(res.data.token, res.data.user);
-      navigate(`/${role.toLowerCase()}`);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        // In a real app, you'd fetch the role from a 'profiles' table
+        // For this fix, we'll use the user's metadata or the selected role if it matches
+        const userRole = data.user.user_metadata?.role || role;
+        
+        const userData: User = {
+          id: data.user.id,
+          name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User',
+          email: data.user.email!,
+          role: userRole as any
+        };
+
+        login(data.session?.access_token || '', userData);
+        navigate(`/${userRole.toLowerCase()}`);
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Login failed');
+      setError(err.message || 'Login failed');
     }
   };
 
@@ -263,8 +284,12 @@ const Login = () => {
           </form>
 
           <div className="mt-8 text-center bg-blue-50 p-4 rounded-xl">
-            <p className="text-xs text-blue-600 font-medium mb-1 uppercase tracking-wider">Sample Credentials</p>
-            <p className="text-sm text-gray-600 font-mono">admin@placement.edu / admin123</p>
+            <p className="text-xs text-blue-600 font-medium mb-1 uppercase tracking-wider">Sample {role} Credentials</p>
+            <p className="text-sm text-gray-600 font-mono">
+              {role === 'ADMIN' ? 'admin@placement.edu / admin123' : 
+               role === 'STUDENT' ? 'student@college.edu / student123' : 
+               'company@hr.com / company123'}
+            </p>
           </div>
         </div>
       </motion.div>
@@ -791,12 +816,32 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('user');
-    if (savedUser && token) {
-      setUser(JSON.parse(savedUser));
-    }
-    setLoading(false);
-  }, [token]);
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const savedUser = localStorage.getItem('user');
+      
+      if (session && savedUser) {
+        setToken(session.access_token);
+        setUser(JSON.parse(savedUser));
+      }
+      setLoading(false);
+    };
+
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session) {
+        setToken(session.access_token);
+      } else {
+        setUser(null);
+        setToken(null);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);
@@ -805,7 +850,8 @@ export default function App() {
     setUser(newUser);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setToken(null);
