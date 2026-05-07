@@ -1,0 +1,6 @@
+{
+  "name": "Campus Placement Management System",
+  "description": "A comprehensive portal for students, companies, and admins to manage college campus placements. Features include job applications, interview tracking, eligibility checks, and real-time analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["Full-Stack", "Auth", "SQL"]
+}

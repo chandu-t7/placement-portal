@@ -1,11 +1,38 @@
-<div align="center">
+# Campus Placement Management System
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A Production-Ready Full-Stack application for managing college placements.
 
-  <h1>Built with AI Studio</h2>
+## Tech Stack
+- **Frontend**: React 19, Vite, Tailwind CSS, Recharts, Lucide Icons, Framer Motion.
+- **Backend**: Node.js, Express, SQLite (SQL), JWT, Bcrypt.
+- **Architecture**: Layered (Controller -> Service -> Model) with OOP implementation.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Features
+- **Admin**: Dashboard with Recharts analytics, manage all entities.
+- **Student**: View jobs, eligibility checks, one-click apply, notification center.
+- **Company**: Post jobs, view applicant skills/CGPA, set criteria.
+- **Security**: Password hashing, JWT Auth, Role-Based Access Control.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Credentials
+### Admin
+- **Email**: `admin@placement.edu`
+- **Password**: `admin123`
 
-</div>
+### Student
+- **Email**: `student@placement.edu`
+- **Password**: `student123`
+
+### Company
+- **Email**: `hr@techcorp.com`
+- **Password**: `company123`
+
+## OOP Implementation Details
+- **Person (Abstract Class)**: Base for Auth entities.
+- **Student (Class)**: Implements `Eligible` interface, extends `Person`.
+- **JobRole (Base)**: Inherited by `TechnicalRole` and `NonTechnicalRole`.
+- **Exceptions**: `IneligibleStudentException`, `DuplicateRegistrationException`.
+- **Multithreading**: Simulated using asynchronous notification dispatching.
+
+## Setup
+1. `npm install`
+2. `npm run dev` (Runs both frontend and backend on port 3000)
